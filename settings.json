@@ -1,14 +1,14 @@
 {
-  "name": "AFK Bot",
+  "name": "AFK",
   "bot-account": {
-    "username": "Slobot00",
+    "username": "serveronbot",
     "password": "",
     "type": "offline"
   },
   "server": {
     "ip": "lollorabaz.play.hosting",
     "port": 9475,
-    "version": "",
+    "version": "26.2",
     "try-creative": false
   },
   "position": {
@@ -74,7 +74,7 @@
   },
   "discord": {
     "enabled": false,
-    "webhookUrl": "YOUR_DISCORD_WEBHOOK_URL_HERE",
+    "webhookUrl": "https://discord.com/api/webhooks/1535173729813012551/U10wDWhQDSi5NrRCF3t74uAf2m_XtZqDGBAVBUok-8AU5gwhzFZ9_4szLgkv0eSgD9pM",
     "events": {
       "connect": true,
       "disconnect": true,
