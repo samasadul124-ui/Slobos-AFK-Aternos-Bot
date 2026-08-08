@@ -1,15 +1,15 @@
 {
-  "name": "AFK",
+  "name": "lokilord",
   "bot-account": {
-    "username": "serveronbot",
-    "password": "",
-    "type": "offline"
+    "username": "loki",
+    "password": "loki09",
+    "type": "online"
   },
   "server": {
     "ip": "lollorabaz.play.hosting",
     "port": 51679,
     "version": "1.21.11",
-    "try-creative": false
+    "try-creative": true
   },
   "position": {
     "enabled": true,
