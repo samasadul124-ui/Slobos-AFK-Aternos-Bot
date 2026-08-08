@@ -2,8 +2,8 @@
   "name": "lokilord",
   "bot-account": {
     "username": "loki",
-    "password": "loki09",
-    "type": "microsoft"
+    "password": "",
+    "type": "offline"
   },
   "server": {
     "ip": "masadulshaikh.aternos.me",
