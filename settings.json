@@ -6,7 +6,7 @@
     "type": "offline"
   },
   "server": {
-    "ip": "masadulshaikh.aternos.me",
+    "ip": "marblefish.aternos.host",
     "port": 60607,
     "version": "1.21.11",
     "try-creative": false
