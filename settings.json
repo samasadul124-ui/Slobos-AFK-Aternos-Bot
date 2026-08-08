@@ -3,7 +3,7 @@
   "bot-account": {
     "username": "loki",
     "password": "loki09",
-    "type": "online"
+    "type": "microsoft"
   },
   "server": {
     "ip": "masadulshaikh.aternos.me",
