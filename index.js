@@ -1184,6 +1184,150 @@ function getReconnectDelay() {
   return delay + jitter;
 }
 
+// ============================================================
+// SERVER VERSION NEGOTIATION
+// The bot can only speak protocol versions that the installed
+// minecraft-protocol/minecraft-data packages know. When a server
+// auto-updates to a brand-new Minecraft version (e.g. 26.3) before
+// those packages add support, joining fails with
+// "Unsupported protocol version" (auto-detect) or an "Outdated client"
+// kick (pinned version). Instead of crashing or looping forever, the
+// bot now auto-detects first and then falls back through every client
+// version this build supports. It rejoins automatically as soon as the
+// gap is bridged (ViaVersion/ViaBackwards on the server being updated,
+// the server being set back to an older version, or this bot's
+// dependencies gaining support), and logs clear guidance meanwhile.
+// ============================================================
+const mcp = require("minecraft-protocol");
+
+const NEWEST_SUPPORTED_VERSION =
+  mcp.supportedVersions[mcp.supportedVersions.length - 1];
+
+// Ordered fallback list: user's pinned version first (if any), then the
+// most recent versions this bot supports (newest first). Ancient versions
+// are skipped on purpose: if the server rejects the newest clients, it is
+// running something even newer and the old ones cannot possibly work.
+const MAX_FALLBACK_VERSIONS = 6;
+const VERSION_FALLBACKS = (() => {
+  const list = [];
+  if (config.server.version && String(config.server.version).trim() !== "") {
+    list.push(String(config.server.version).trim());
+  }
+  for (let i = mcp.supportedVersions.length - 1; i >= 0; i--) {
+    list.push(mcp.supportedVersions[i]);
+  }
+  return [...new Set(list)].slice(0, MAX_FALLBACK_VERSIONS);
+})();
+
+let versionState = {
+  resolved: null, // version that last spawned successfully
+  triedAuto: false, // whether plain auto-detect has been attempted
+  fallbackIndex: -1, // -1 = still in auto-detect mode
+  adviceCounter: 0, // throttles the "server too new" advice logs
+};
+
+function isVersionIncompatibility(text) {
+  return /unsupported protocol version|outdated client|outdated server|incompatible (version|client)|protocol version .*not supported|not supported/i.test(
+    String(text),
+  );
+}
+
+// Returns false (auto-detect) or a version string for this attempt.
+function pickVersionForAttempt() {
+  if (versionState.resolved) return versionState.resolved;
+
+  if (!versionState.triedAuto) {
+    versionState.triedAuto = true;
+    addLog("[Version] Trying to auto-detect the server's version...");
+    return false;
+  }
+
+  if (versionState.fallbackIndex < 0) versionState.fallbackIndex = 0;
+  const v = VERSION_FALLBACKS[versionState.fallbackIndex];
+  addLog(
+    `[Version] Trying supported client version ${v} (${versionState.fallbackIndex + 1}/${VERSION_FALLBACKS.length})`,
+  );
+  return v;
+}
+
+function logNewServerAdvice() {
+  addLog("=".repeat(50));
+  addLog(
+    "[Version] [!!!] The server runs a Minecraft version NEWER than this bot",
+  );
+  addLog(
+    `[Version] [!!!] supports natively (max supported today: ${NEWEST_SUPPORTED_VERSION}).`,
+  );
+  addLog("[Version] [!!!] To get the bot back in-game, do ONE of:");
+  addLog(
+    "[Version]  1) On Aternos, set the server back to an older version (e.g. 26.2) that your plugins support; OR",
+  );
+  addLog(
+    "[Version]  2) Install/update the ViaVersion + ViaBackwards plugins on the server once THEY support the new version; OR",
+  );
+  addLog(
+    "[Version]  3) Update this bot (npm update + redeploy) once mineflayer/minecraft-protocol add support.",
+  );
+  addLog("=".repeat(50));
+}
+
+// Called once per attempt when the server rejects us for version reasons.
+function advanceVersionChain(source, detail) {
+  const shortDetail = String(detail).slice(0, 160);
+
+  // A previously-working version stopped working (server updated?).
+  if (versionState.resolved) {
+    addLog(
+      `[Version] Previously-working version ${versionState.resolved} was rejected (${source}: ${shortDetail}) - re-negotiating...`,
+    );
+    versionState.resolved = null;
+    versionState.triedAuto = true;
+    versionState.fallbackIndex = 0;
+    logNewServerAdvice();
+    return;
+  }
+
+  if (versionState.fallbackIndex < 0) {
+    // Auto-detect failed because the server's protocol is unknown to us.
+    addLog(
+      `[Version] Server protocol is newer than this bot stack knows (${source}: ${shortDetail}). Falling back to supported client versions...`,
+    );
+    versionState.fallbackIndex = 0;
+    // This is the classic "Aternos auto-updated to a brand-new Minecraft
+    // release" case - tell the user straight away what is going on.
+    logNewServerAdvice();
+  } else {
+    addLog(
+      `[Version] Client version ${VERSION_FALLBACKS[versionState.fallbackIndex]} rejected (${source}: ${shortDetail})`,
+    );
+    versionState.fallbackIndex++;
+  }
+
+  // Exhausted the whole list: keep retrying with the newest supported
+  // version (in case the server adds ViaBackwards or is rolled back)
+  // and periodically re-print actionable guidance.
+  if (versionState.fallbackIndex >= VERSION_FALLBACKS.length) {
+    versionState.fallbackIndex = VERSION_FALLBACKS.indexOf(
+      NEWEST_SUPPORTED_VERSION,
+    );
+    versionState.adviceCounter++;
+    if (versionState.adviceCounter % 5 === 0) {
+      logNewServerAdvice();
+    }
+  }
+}
+
+// Called on successful spawn to remember the working version.
+function markVersionResolved(version) {
+  if (versionState.resolved !== version) {
+    addLog(`[Version] Connected using client version: ${version}`);
+  }
+  versionState.resolved = version;
+  versionState.triedAuto = false;
+  versionState.fallbackIndex = -1;
+  versionState.adviceCounter = 0;
+}
+
 function createBot() {
   if (isReconnecting) {
     addLog("[Bot] Already reconnecting, skipping...");
@@ -1206,12 +1350,20 @@ function createBot() {
   addLog(`[Bot] Connecting to ${config.server.ip}:${config.server.port}`);
 
   try {
-    // FIX: use version:false to auto-detect server version so the bot can join any server.
-    // If the user explicitly sets a version in settings.json it is still respected.
-    const botVersion =
-      config.server.version && config.server.version.trim() !== ""
-        ? config.server.version
-        : false;
+    // Version negotiation: auto-detect first, then fall back through every
+    // client version this bot supports if the server rejects us for being
+    // outdated (e.g. right after the server auto-updates to a brand-new
+    // Minecraft release). A version pinned in settings.json is tried first
+    // among the fallbacks.
+    const botVersion = pickVersionForAttempt();
+    // Guards against counting the same failure twice (a kick may be followed
+    // by an error event for the same connection attempt).
+    let versionFailureHandled = false;
+    const handleVersionFailure = (source, detail) => {
+      if (versionFailureHandled) return;
+      versionFailureHandled = true;
+      advanceVersionChain(source, detail);
+    };
     bot = mineflayer.createBot({
       username: config["bot-account"].username,
       password: config["bot-account"].password || undefined,
@@ -1253,6 +1405,7 @@ function createBot() {
       botState.lastActivity = Date.now();
       botState.reconnectAttempts = 0;
       isReconnecting = false;
+      markVersionResolved(bot.version);
 
       addLog(
         `[Bot] [+] Successfully spawned on server! (Version: ${bot.version})`,
@@ -1323,6 +1476,12 @@ function createBot() {
         botState.wasThrottled = true;
       }
 
+      // Server rejected us because our protocol version is too old/new
+      // (e.g. "Outdated client! Please use 26.3") - try the next candidate.
+      if (isVersionIncompatibility(kickReason)) {
+        handleVersionFailure("kick", kickReason);
+      }
+
       if (
         config.discord &&
         config.discord.events &&
@@ -1359,10 +1518,20 @@ function createBot() {
       const msg = err.message || "";
       addLog(`[Bot] Error: ${msg}`);
       botState.errors.push({ type: "error", message: msg, time: Date.now() });
+      // Auto-detect against a too-new server fails here with
+      // "Unsupported protocol version '...'" - try the next candidate.
+      if (isVersionIncompatibility(msg)) {
+        handleVersionFailure("error", msg);
+      }
       // Don't reconnect on error - let 'end' event handle it
     });
   } catch (err) {
     addLog(`[Bot] Failed to create bot: ${err.message}`);
+    // An invalid/unknown pinned version throws synchronously
+    // ("unsupported protocol version: ...") - advance as well.
+    if (isVersionIncompatibility(err.message)) {
+      advanceVersionChain("createBot", err.message);
+    }
     scheduleReconnect();
   }
 }
@@ -2070,7 +2239,13 @@ addLog("=".repeat(50));
 addLog("  Minecraft AFK Bot v2.5 - Bug-Fixed Edition");
 addLog("=".repeat(50));
 addLog(`Server: ${config.server.ip}:${config.server.port}`);
-addLog(`Version: ${config.server.version}`);
+addLog(
+  `Version: ${
+    config.server.version && String(config.server.version).trim() !== ""
+      ? config.server.version + " (pinned, auto-fallback enabled)"
+      : "auto-detect (max supported: " + NEWEST_SUPPORTED_VERSION + ")"
+  }`,
+);
 addLog(
   `Auto-Reconnect: ${config.utils["auto-reconnect"] ? "Enabled" : "Disabled"}`,
 );

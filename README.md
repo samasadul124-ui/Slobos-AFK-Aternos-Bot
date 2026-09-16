@@ -36,6 +36,17 @@ We have made setup super easy! Check out the guide below:
 
 ---
 
+## 🔄 Minecraft Version Compatibility
+*   The bot can only speak versions supported by `minecraft-protocol`/`minecraft-data` (check `package-lock.json`; currently up to **26.1**).
+*   **Recommended**: leave `"version": ""` in `settings.json`. The bot then auto-detects the server version, and if the server is newer than the bot (e.g. right after an Aternos auto-update), it automatically falls back through the newest client versions it supports.
+*   **Server updated to a brand-new Minecraft version?** The bot logs a clear `[Version] [!!!]` explanation. Your options until the ecosystem catches up:
+    1.  On Aternos, set the server back to the previous version (e.g. **26.2**) — keep ViaVersion + ViaBackwards installed so the bot (and your Bedrock players via Geyser) can join.
+    2.  Wait for **ViaBackwards**/**Geyser** to add support for the new version, then update those plugins on Aternos.
+    3.  Update this bot (`npm update`, commit, redeploy) once mineflayer/minecraft-protocol support the new version.
+*   Want a fixed client protocol anyway? Set `"version": "26.1"` (or any supported version) in `settings.json` — the bot tries auto-detect first, then your pin, then the other supported versions.
+
+---
+
 ## ⚠️ Disclaimer
 This project is not affiliated with Aternos, Mojang, or Microsoft. Use at your own risk. Misuse may violate platform terms of service. This bot does not bypass Aternos queue limits; it only keeps the server active once it is online.
 
